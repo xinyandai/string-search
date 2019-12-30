@@ -55,7 +55,7 @@ void lsh(
   vector<StringLSH > tables;
   tables.reserve(num_cgk);
   for (int i = 0; i < num_cgk; ++i) {
-    tables.emplace_back(num_hash,num_bits,cgk_l,num_dict,signatures);
+    tables.emplace_back(num_hash, num_bits, cgk_l, num_dict, signatures);
   }
 
   cout << "add base items to tables" << endl;
@@ -71,7 +71,7 @@ void lsh(
   for (int i = 0; i < query_strings.size(); ++i) {
     for (int k = 0; k < tables.size(); ++k) {
       unordered_set<size_type > candidates = tables[k].query(query_strings[i]);
-      std::copy(candidates.begin(), candidates.end(), std::inserter(res[i], res[i].end()));
+      res[i].insert(candidates.begin(), candidates.end());
     }
   }
 
@@ -82,18 +82,20 @@ void lsh(
   }
   std::cout << "cnt \t: " << cnt / res.size() << endl;
 
-  size_type topk = 10;
-  double recall = 0;
+  vector<size_type > top_k = {1, 10, 20, 50, 100, 1000};
+  for (auto topk : top_k) {
+    double recall = 0;
 #pragma omp parallel for reduction(+ : recall)
-  for (int i = 0; i < nq; ++i) {
-    for (int j = 0; j < topk; ++j) {
-      int id = ed[i * nb + j];
-      if (res[i].find(id) != res[i].end()) {
-        recall+=1;
+    for (int i = 0; i < nq; ++i) {
+      for (int j = 0; j < topk; ++j) {
+        int id = ed[i * nb + j];
+        if (res[i].find(id) != res[i].end()) {
+          recall+=1;
+        }
       }
     }
+    std::cout << topk << " \t: " << recall / res.size() / topk << endl;
   }
-  std::cout << "recall \t: " << recall / res.size() / topk << endl;
 }
 
 
@@ -200,7 +202,7 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  auto max_l = (size_type)atoi(argv[1]);
+  auto cgk_l = (size_type)atoi(argv[1]);
   auto num_cgk = (size_type)atoi(argv[2]);
   auto num_hash = (size_type)atoi(argv[3]);
   auto num_bits = (size_type)atoi(argv[4]);
@@ -209,7 +211,6 @@ int main(int argc, char **argv) {
   string query_location = argv[6];
   string ground_truth = argv[7];
 
-  size_type cgk_l = 3 * max_l;
   size_type num_dict = 0;
   size_type num_base = 0;
   size_type num_query = 0;
@@ -230,8 +231,8 @@ int main(int argc, char **argv) {
   cnpy::NpyArray load_np = cnpy::npy_load(ground_truth);
   const int* ed = load_np.data<int >();
 
-  cgk_rank(query_strings, base_strings,
-      num_cgk, num_hash, num_bits, cgk_l, num_dict, signatures, ed);
+//  cgk_rank(query_strings, base_strings,
+//      num_cgk, num_hash, num_bits, cgk_l, num_dict, signatures, ed);
   lsh(query_strings, base_strings,
     num_cgk, num_hash, num_bits, cgk_l, num_dict, signatures, ed);
 

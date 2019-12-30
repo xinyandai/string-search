@@ -109,6 +109,8 @@ class CGKRanker {
   vector<CGKEmbed > cgk_embed_;
 };
 
+
+
 class StringLSH {
  public:
   StringLSH(
@@ -121,20 +123,35 @@ class StringLSH {
     num_hash_(num_hash),
     cgk_l_(cgk_l),
     num_bits_(num_bits),
-    hash_lsh_(num_hash, vector<size_type >(num_bits_, 0)),
+    hash_lsh_(num_hash, vector<size_type >(num_bits, 0)),
     index_(num_hash, IndexType()),
     cgk_embed_(cgk_l, num_dict, signatures) {
     // initialize LSH
-    for (int i = 0; i < num_bits; ++i) {
+    for (int i = 0; i < num_hash; ++i) {
       for (int j = 0; j < num_bits; ++j) {
         hash_lsh_[i][j] = rand() % cgk_l;
       }
     }
+  /*
+    vector<int> lshnumber;
+    lshnumber.reserve(hash_lsh_.size());
+    for (int i = 0; i < num_hash; i++)
+      lshnumber.insert(lshnumber.end(), hash_lsh_[i].begin(), hash_lsh_[i].end());
+    sort(lshnumber.begin(), lshnumber.end());
+    lshnumber.erase(unique(lshnumber.begin(), lshnumber.end()), lshnumber.end());
+
+    for (int i = 0; i < num_hash; i++) {
+      for (int j = 0; j < num_bits; j++) {
+        auto lb = lower_bound(lshnumber.begin(), lshnumber.end(), hash_lsh_[i][j]);
+        hash_lsh_[i][j] = size_type (lb - lshnumber.begin());
+      }
+    }
+  */
   }
 
   vector<string > hash(const string& x) const {
     string cgk = cgk_embed_.embed(x);
-    vector<string > res(num_hash_, string(num_bits_, '\0'));
+    vector<string > res(num_hash_, string(num_bits_, ' '));
     for (int i = 0; i < num_hash_; ++i) {
       for (int j = 0; j < num_bits_; ++j) {
         res[i][j] = cgk[hash_lsh_[i][j]];
@@ -151,7 +168,7 @@ class StringLSH {
       auto it = index_[i].find(hash_val[i]);
       if (it != index_[i].end()) {
         const vector<size_type >& candidates = it->second;
-        std::copy(candidates.begin(), candidates.end(), std::inserter(res, res.end()));
+        res.insert(candidates.begin(), candidates.end());
       }
     }
     return res;
@@ -167,13 +184,14 @@ class StringLSH {
     add_hash_val(hash(x), id);
   }
 
-
   void add(const vector<string>& xs) {
     vector<vector<string> > hash_vals(xs.size(), vector<string>());
+
 #pragma omp parallel for
     for (int k = 0; k < xs.size(); ++k) {
       hash_vals[k] = hash(xs[k]);
     }
+
 #pragma omp parallel for
     for (int h = 0; h < num_hash_; ++h) {
       for (int k = 0; k < hash_vals.size(); ++k) {
