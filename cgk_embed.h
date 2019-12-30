@@ -5,6 +5,7 @@
 #pragma once
 #include <unordered_set>
 #include <unordered_map>
+#include <random>
 #include <omp.h>
 
 #include "utils.h"
@@ -61,12 +62,24 @@ class CGKRanker {
 
  public:
   CGKRanker(
+    const size_type num_bits,
     const size_type num_cgk,
     const size_type cgk_l,
     const size_type num_dict,
     const vector<size_type >& signatures)
     :
-    num_cgk_(num_cgk), cgk_l_(cgk_l) {
+    num_bits_(num_bits), num_cgk_(num_cgk), cgk_l_(cgk_l), hash_lsh_(num_cgk) {
+
+    // initialize LSH
+    for (int i = 0; i < num_cgk; ++i) {
+
+      std::vector<int> indices(cgk_l);
+      std::iota(indices.begin(), indices.end(), 0);
+      std::random_device rd;
+      std::mt19937 eng(rd());
+      std::shuffle(indices.begin(), indices.end(), eng);
+      hash_lsh_[i] = vector<size_type >(indices.begin(), indices.begin() + num_bits);
+    }
 
     // construction
     cgk_embed_.reserve(num_cgk);
@@ -77,8 +90,13 @@ class CGKRanker {
 
   string embed(const string& x) const {
     string res;
-    for (auto cgk_embed : cgk_embed_) {
-      res += cgk_embed.embed(x);
+    res.reserve(num_cgk_ * num_bits_);
+
+    for (int i = 0; i < num_cgk_; i++) {
+      string cgk_x = cgk_embed_[i].embed(x);
+      for (int j = 0; j < num_bits_; ++j) {
+        res += cgk_x[ hash_lsh_[i][j] ];
+      }
     }
     return res;
   }
@@ -103,110 +121,11 @@ class CGKRanker {
   }
 
  private:
+  const size_type num_bits_;
   const size_type num_cgk_;
   const size_type cgk_l_;
   vector<string > embed_string_;
+  vector<vector<size_type > > hash_lsh_;
   vector<CGKEmbed > cgk_embed_;
 };
 
-
-
-class StringLSH {
- public:
-  StringLSH(
-    const size_type num_hash,
-    const size_type num_bits,
-    const size_type cgk_l,
-    const size_type num_dict,
-    const vector<size_type >& signatures)
-    :
-    num_hash_(num_hash),
-    cgk_l_(cgk_l),
-    num_bits_(num_bits),
-    hash_lsh_(num_hash, vector<size_type >(num_bits, 0)),
-    index_(num_hash, IndexType()),
-    cgk_embed_(cgk_l, num_dict, signatures) {
-    // initialize LSH
-    for (int i = 0; i < num_hash; ++i) {
-      for (int j = 0; j < num_bits; ++j) {
-        hash_lsh_[i][j] = rand() % cgk_l;
-      }
-    }
-  /*
-    vector<int> lshnumber;
-    lshnumber.reserve(hash_lsh_.size());
-    for (int i = 0; i < num_hash; i++)
-      lshnumber.insert(lshnumber.end(), hash_lsh_[i].begin(), hash_lsh_[i].end());
-    sort(lshnumber.begin(), lshnumber.end());
-    lshnumber.erase(unique(lshnumber.begin(), lshnumber.end()), lshnumber.end());
-
-    for (int i = 0; i < num_hash; i++) {
-      for (int j = 0; j < num_bits; j++) {
-        auto lb = lower_bound(lshnumber.begin(), lshnumber.end(), hash_lsh_[i][j]);
-        hash_lsh_[i][j] = size_type (lb - lshnumber.begin());
-      }
-    }
-  */
-  }
-
-  vector<string > hash(const string& x) const {
-    string cgk = cgk_embed_.embed(x);
-    vector<string > res(num_hash_, string(num_bits_, ' '));
-    for (int i = 0; i < num_hash_; ++i) {
-      for (int j = 0; j < num_bits_; ++j) {
-        res[i][j] = cgk[hash_lsh_[i][j]];
-      }
-    }
-    return res;
-  }
-
-  unordered_set<size_type > query(const string& x) const {
-    unordered_set<size_type > res;
-    vector<string> hash_val = hash(x);
-
-    for (int i = 0; i < num_hash_; ++i) {
-      auto it = index_[i].find(hash_val[i]);
-      if (it != index_[i].end()) {
-        const vector<size_type >& candidates = it->second;
-        res.insert(candidates.begin(), candidates.end());
-      }
-    }
-    return res;
-  }
-
-  void add_hash_val(const vector<string>& hash_val, int id) {
-    for (int i = 0; i < num_hash_; ++i) {
-      index_[i][hash_val[i]].push_back(id);
-    }
-  }
-
-  void add(const string& x, int id) {
-    add_hash_val(hash(x), id);
-  }
-
-  void add(const vector<string>& xs) {
-    vector<vector<string> > hash_vals(xs.size(), vector<string>());
-
-#pragma omp parallel for
-    for (int k = 0; k < xs.size(); ++k) {
-      hash_vals[k] = hash(xs[k]);
-    }
-
-#pragma omp parallel for
-    for (int h = 0; h < num_hash_; ++h) {
-      for (int k = 0; k < hash_vals.size(); ++k) {
-        index_[h][hash_vals[k][h]].push_back(k);
-      }
-    }
-  }
-
- private:
-  const size_type num_hash_;
-  const size_type num_bits_;
-  const size_type cgk_l_;
-  vector<vector<size_type > > hash_lsh_;
-
-  vector<IndexType> index_;
-  CGKEmbed cgk_embed_;
-
-};

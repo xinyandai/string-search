@@ -37,68 +37,6 @@ void load_data(
 }
 
 
-void lsh(
-  const vector<string >& query_strings,
-  const vector<string >& base_strings,
-  const size_type  num_cgk,
-  const size_type  num_hash,
-  const size_type  num_bits,
-  const size_type  cgk_l,
-  const size_type  num_dict,
-  const vector<size_type > & signatures,
-  const int* ed) {
-
-  auto nb  = (size_type)base_strings.size();
-  auto nq  = (size_type)query_strings.size();
-
-  cout << "construction tables" << endl;
-  vector<StringLSH > tables;
-  tables.reserve(num_cgk);
-  for (int i = 0; i < num_cgk; ++i) {
-    tables.emplace_back(num_hash, num_bits, cgk_l, num_dict, signatures);
-  }
-
-  cout << "add base items to tables" << endl;
-#pragma omp parallel for
-  for (int i = 0; i < tables.size(); i++) {
-    tables[i].add(base_strings);
-  }
-
-  cout << "query" << endl;
-  vector<unordered_set<size_type > > res(
-    query_strings.size(), unordered_set<size_type >());
-#pragma omp parallel for
-  for (int i = 0; i < query_strings.size(); ++i) {
-    for (int k = 0; k < tables.size(); ++k) {
-      unordered_set<size_type > candidates = tables[k].query(query_strings[i]);
-      res[i].insert(candidates.begin(), candidates.end());
-    }
-  }
-
-
-  double cnt = 0;
-  for (auto& candidates : res) {
-    cnt += candidates.size();
-  }
-  std::cout << "cnt \t: " << cnt / res.size() << endl;
-
-  vector<size_type > top_k = {1, 10, 20, 50, 100, 1000};
-  for (auto topk : top_k) {
-    double recall = 0;
-#pragma omp parallel for reduction(+ : recall)
-    for (int i = 0; i < nq; ++i) {
-      for (int j = 0; j < topk; ++j) {
-        int id = ed[i * nb + j];
-        if (res[i].find(id) != res[i].end()) {
-          recall+=1;
-        }
-      }
-    }
-    std::cout << topk << " \t: " << recall / res.size() / topk << endl;
-  }
-}
-
-
 void cgk_rank(
   const vector<string >& query_strings,
   const vector<string >& base_strings,
@@ -112,9 +50,8 @@ void cgk_rank(
 
   auto nb  = (size_type)base_strings.size();
   auto nq  = (size_type)query_strings.size();
-  nq = 8;
 
-  CGKRanker ranker(num_cgk, cgk_l,  num_dict, signatures);
+  CGKRanker ranker(num_bits, num_cgk, cgk_l,  num_dict, signatures);
 
   cout << "add base items to tables" << endl;
   ranker.add(base_strings);
@@ -189,16 +126,19 @@ void cgk_rank(
 
 
 /***
- * \str_location: a set of strings in a file
+ * \cgk_l: the length of truncation, recommended to be the average length of strings
  * \num_cgk: number of CGK-embedding for each input string
  * \num_hash: number of hash functions for each embedded string
  * \num_bits: number of bits in each hash function
- * \max_l: the length of truncation, recommended to be the average length of strings
+ * \base_location: a set of strings in a file
+ * \query_location: a set of strings in a file
+ * \ground_truth: knn neighbors in {base} for each {query}
  * @return
  */
 int main(int argc, char **argv) {
-  if (argc == 1) {
-    fprintf(stderr, "usage: ./bin max_l num_cgk num_hash num_bits base_location query_location \n");
+  if (argc != 8) {
+    fprintf(stderr, "usage: ./bin cgk_l num_cgk num_hash num_bits "
+                    "base_location query_location ground_truth\n");
     return 0;
   }
 
@@ -231,10 +171,8 @@ int main(int argc, char **argv) {
   cnpy::NpyArray load_np = cnpy::npy_load(ground_truth);
   const int* ed = load_np.data<int >();
 
-//  cgk_rank(query_strings, base_strings,
-//      num_cgk, num_hash, num_bits, cgk_l, num_dict, signatures, ed);
-  lsh(query_strings, base_strings,
-    num_cgk, num_hash, num_bits, cgk_l, num_dict, signatures, ed);
+  cgk_rank(query_strings, base_strings,
+      num_cgk, num_hash, num_bits, cgk_l, num_dict, signatures, ed);
 
   return 0;
 }
