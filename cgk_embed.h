@@ -3,14 +3,11 @@
 //
 
 #pragma once
-#include <vector>
 #include <unordered_set>
 #include <unordered_map>
-#include <iostream>
-#include <sstream>
-#include <fstream>
-#include <string.h>
 #include <omp.h>
+
+#include "utils.h"
 
 using size_type = unsigned;
 using std::string;
@@ -32,13 +29,13 @@ class CGKEmbed {
 
     for (int i = 0; i < cgk_randoms.size(); ++i) {
       for (int j = 0; j < num_dict; ++j) {
-        cgk_randoms[i][j] = rand() % 1;
+        cgk_randoms[i][j] = rand() % 2; // 0 or 1
       }
     }
   }
 
-  string embed(const string& x) {
-    string out(cgk_l_, '\0');
+  string embed(const string& x) const {
+    string out(cgk_l_, ' ');
     int i = 0;
     int j = 0;
 
@@ -57,6 +54,59 @@ class CGKEmbed {
   const size_type cgk_l_;
   vector<vector<int > > cgk_randoms;
   const vector<size_type >& signatures_;
+};
+
+
+class CGKRanker {
+
+ public:
+  CGKRanker(
+    const size_type num_cgk,
+    const size_type cgk_l,
+    const size_type num_dict,
+    const vector<size_type >& signatures)
+    :
+    num_cgk_(num_cgk), cgk_l_(cgk_l) {
+
+    // construction
+    cgk_embed_.reserve(num_cgk);
+    for (int i = 0; i < num_cgk; ++i) {
+      cgk_embed_.emplace_back(cgk_l, num_dict, signatures);
+    }
+  }
+
+  string embed(const string& x) const {
+    string res;
+    for (auto cgk_embed : cgk_embed_) {
+      res += cgk_embed.embed(x);
+    }
+    return res;
+  }
+
+  void add(const vector<string>& xs) {
+    assert(embed_string_.empty());
+    embed_string_ = vector<string >(xs.size(), "");
+#pragma omp parallel for
+    for (int i = 0; i < xs.size(); ++i) {
+      embed_string_[i] = embed(xs[i]);
+    }
+  }
+
+  vector<int > query(const string& x) const {
+    vector<int > dist(embed_string_.size(), 0);
+    string cgk_x = embed(x);
+#pragma omp parallel for
+    for (int i = 0; i < dist.size(); ++i) {
+      dist[i] = hamming_dist(cgk_x, embed_string_[i]);
+    }
+    return dist;
+  }
+
+ private:
+  const size_type num_cgk_;
+  const size_type cgk_l_;
+  vector<string > embed_string_;
+  vector<CGKEmbed > cgk_embed_;
 };
 
 class StringLSH {
@@ -81,7 +131,8 @@ class StringLSH {
       }
     }
   }
-  vector<string > hash(const string& x) {
+
+  vector<string > hash(const string& x) const {
     string cgk = cgk_embed_.embed(x);
     vector<string > res(num_hash_, string(num_bits_, '\0'));
     for (int i = 0; i < num_hash_; ++i) {
@@ -92,13 +143,16 @@ class StringLSH {
     return res;
   }
 
-  unordered_set<size_type > query(const string& x) {
+  unordered_set<size_type > query(const string& x) const {
     unordered_set<size_type > res;
     vector<string> hash_val = hash(x);
 
     for (int i = 0; i < num_hash_; ++i) {
-      const vector<size_type >& candidates = index_[i][hash_val[i]];
-      std::copy(candidates.begin(), candidates.end(), std::inserter(res, res.end()));
+      auto it = index_[i].find(hash_val[i]);
+      if (it != index_[i].end()) {
+        const vector<size_type >& candidates = it->second;
+        std::copy(candidates.begin(), candidates.end(), std::inserter(res, res.end()));
+      }
     }
     return res;
   }
@@ -116,11 +170,11 @@ class StringLSH {
 
   void add(const vector<string>& xs) {
     vector<vector<string> > hash_vals(xs.size(), vector<string>());
-//#pragma omp parallel for
+#pragma omp parallel for
     for (int k = 0; k < xs.size(); ++k) {
       hash_vals[k] = hash(xs[k]);
     }
-//#pragma omp parallel for
+#pragma omp parallel for
     for (int h = 0; h < num_hash_; ++h) {
       for (int k = 0; k < hash_vals.size(); ++k) {
         index_[h][hash_vals[k][h]].push_back(k);
