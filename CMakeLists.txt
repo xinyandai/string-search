@@ -18,6 +18,7 @@ endif()
 
 link_libraries(-lpthread)
 link_libraries(-lcnpy)
+link_libraries(-lfaiss)
 link_libraries(-lz)
 
 add_executable(string_search main.cpp)

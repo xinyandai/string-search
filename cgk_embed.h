@@ -11,7 +11,7 @@
 
 #include "utils.h"
 
-using size_type = unsigned;
+
 using std::string;
 using std::vector;
 using std::unordered_set;

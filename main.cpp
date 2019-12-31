@@ -1,13 +1,20 @@
 #include <algorithm>
 #include <cnpy.h>
 
+#include <cstdio>
+#include <cstdlib>
+
+#include <faiss/IndexFlat.h>
+#include <faiss/IndexIVFPQ.h>
+
 #include "utils.h"
 #include "cgk_embed.h"
-#include "edit_distance.h"
+
 
 using namespace std;
-using size_type = unsigned;
 
+const vector<size_type > top_k = {1, 10, 20, 50, 100, 1000};
+const vector<size_type > probed = {1, 4, 16, 64, 256, 1024, 4096};
 
 void load_data(
   const string& str_location,
@@ -36,26 +43,90 @@ void load_data(
 
 }
 
-vector<size_t > re_rank(
-  const vector<size_t >& idx,
-  size_type  num_prob,
-  const string& query,
-  const vector<string >& base_strings) {
 
-  auto nb = (size_type)idx.size();
-  assert(nb == base_strings.size());
+void embed_rank(
+  const vector<string >& query_strings,
+  const vector<string >& base_strings,
+  const float* xb, const float* xq,
+  const size_t d, const int* ed, const bool re_rank) {
 
-  num_prob = std::min(num_prob, nb);
-  vector<size_type > dist(num_prob, 0);
-  for (int i = 0; i < num_prob; ++i) {
-    dist[i] = edit_distance(query, base_strings[idx[i]]);
+  auto nb  = (size_type)base_strings.size();
+  auto nq  = (size_type)query_strings.size();
+  size_t n_list = 100;
+  size_t m = 8;
+  faiss::IndexFlatL2 q(d);
+  faiss::IndexIVFPQ index(&q, d, n_list, m, 8);
+  timer time_recorder;
+
+  cout << "training index" << endl;
+  index.train(nb, xb);
+  cout << "add base to index" << endl;
+  index.add(nb, xb);
+
+  for (int j = 0; j < probed.size(); ++j) {
+    const size_type num_prob = probed[j];
+
+    long *I = new long[num_prob * nq];
+    float *D = new float[num_prob * nq];
+
+
+    index.nprobe = num_prob;
+    time_recorder.restart();
+    cout << "searching " << endl;
+    index.search(nq, xq, num_prob, D, I);
+    double embed_rank_time = time_recorder.elapsed();
+
+    vector<double > recalls(top_k.size(), 0);
+    double re_rank_time = 0.0;
+
+    if (re_rank) {
+      time_recorder.restart();
+      vector<vector<size_t > > re_rank_idx(nq);
+
+#pragma omp parallel for
+      for (int i = 0; i < nq; ++i) {
+        re_rank_idx[i] = ed_rank(&I[i * nb], num_prob, query_strings[i], base_strings);
+      }
+
+      re_rank_time = time_recorder.elapsed();
+
+#pragma omp parallel for
+      for (int k = 0; k < top_k.size(); ++k) {
+        for (int i = 0; i < nq; ++i) {
+          recalls[k] += intersection_size(
+            re_rank_idx[i].begin(), re_rank_idx[i].end(),
+            &ed[i * nb], &ed[i * nb + top_k[k]]);
+        }
+      }
+    }
+
+    else {
+#pragma omp parallel for
+      for (int k = 0; k < top_k.size(); ++k) {
+        for (int i = 0; i < nq; ++i) {
+          recalls[k] += std::count_if(
+            &I[i * num_prob], &I[(i + 1) * num_prob],
+            [nb, ed, i, k] (const long id) {
+              for (int l = 0; l < top_k[k]; ++l) {
+                if (id == (size_t)ed[i * nb + l])
+                  return true;
+              }
+              return false;
+            });
+        }
+      }
+
+    }
+
+    std::cout << probed[j] << "\t" << embed_rank_time << "\t" << re_rank_time ;
+    for (int k = 0; k < top_k.size(); ++k) {
+      std::cout << "\t" << recalls[k] / nq / top_k[k];
+    }
+    std::cout << std::endl;
+
+    delete [] I;
+    delete [] D;
   }
-
-  vector<size_t > res = arg_sort(dist);
-  for (int i = 0; i < num_prob; ++i) {
-    res[i] = idx[res[i]];
-  }
-  return res;
 }
 
 
@@ -68,7 +139,8 @@ void cgk_rank(
   const size_type  cgk_l,
   const size_type  num_dict,
   const vector<size_type > & signatures,
-  const int* ed) {
+  const int* ed,
+  bool re_rank) {
 
   auto nb  = (size_type)base_strings.size();
   auto nq  = (size_type)query_strings.size();
@@ -76,22 +148,18 @@ void cgk_rank(
   CGKRanker ranker(num_bits, num_cgk, cgk_l,  num_dict, signatures);
 
   cout << "add base items to tables" << endl;
+  timer time_recorder;
   ranker.add(base_strings);
+  cout << "add time " << time_recorder.elapsed() << endl;
 
-
+  time_recorder.restart();
   vector<vector<size_t > > idx(nq, vector<size_t >());
   {
     // dist should be cleared after sorting
     vector<vector<int> > dist(nq, vector<int>());
     cout << "compute hamming distance" << endl;
-    boost::progress_display progress_dist(nq);
-
 #pragma omp parallel for
     for (int i = 0; i < nq; ++i) {
-#pragma omp critical
-      {
-        ++progress_dist;
-      }
       dist[i] = ranker.query(query_strings[i]);
     }
 
@@ -99,50 +167,60 @@ void cgk_rank(
 
 #pragma omp parallel for
     for (int i = 0; i < nq; ++i) {
-#pragma omp critical
-      {
-        ++progress_sort;
-      }
       idx[i] = arg_sort(dist[i]);
     }
   }
+  double embed_rank_time = time_recorder.elapsed();
+
 
   cout << "compute recalls" << endl;
-  vector<size_type > top_k = {1, 10, 20, 50, 100, 1000};
-  vector<size_type > probed;
-  const size_type varies_prob = 20;
-  probed.reserve(varies_prob);
-  for (int i = 0; i < varies_prob; ++i) {
-    probed.push_back((size_type)1 << i);
-  }
 
   for (int j = 0; j < probed.size(); ++j) {
     const size_type num_prob = probed[j];
 
     vector<double > recalls(top_k.size(), 0);
-    vector<vector<size_t > > re_rank_idx(nq);
-
-    boost::progress_display progress_rank(nq);
-
-#pragma omp parallel for
-    for (int i = 0; i < nq; ++i) {
-#pragma omp critical
-      {
-        ++progress_rank;
-      }
-      re_rank_idx[i] = re_rank(idx[i], num_prob, query_strings[i], base_strings);
-    }
+    double re_rank_time = 0.0;
+    if (re_rank) {
+      time_recorder.restart();
+      vector<vector<size_t > > re_rank_idx(nq);
 
 #pragma omp parallel for
-    for (int k = 0; k < top_k.size(); ++k) {
       for (int i = 0; i < nq; ++i) {
-        recalls[k] += intersection_size(
-          re_rank_idx[i].begin(), re_rank_idx[i].end(),
-          &ed[i * nb], &ed[i * nb + top_k[k]]);
+        re_rank_idx[i] = ed_rank(idx[i].data(), num_prob, query_strings[i], base_strings);
+      }
+
+      re_rank_time = time_recorder.elapsed();
+
+#pragma omp parallel for
+      for (int k = 0; k < top_k.size(); ++k) {
+        for (int i = 0; i < nq; ++i) {
+          recalls[k] += intersection_size(
+            re_rank_idx[i].begin(), re_rank_idx[i].end(),
+            &ed[i * nb], &ed[i * nb + top_k[k]]);
+        }
       }
     }
 
-    std::cout << probed[j];
+    else {
+
+#pragma omp parallel for
+      for (int k = 0; k < top_k.size(); ++k) {
+        for (int i = 0; i < nq; ++i) {
+          recalls[k] += std::count_if(
+            idx[i].begin(), probed[j] < nb ? idx[i].begin() + probed[j] : idx[i].end(),
+            [nb, ed, i, k] (const size_t id) {
+              for (int l = 0; l < top_k[k]; ++l) {
+                if (id == ed[i * nb + l])
+                  return true;
+              }
+              return false;
+            });
+        }
+      }
+
+    }
+
+    std::cout << probed[j] << "\t" << embed_rank_time << "\t" << re_rank_time ;
     for (int k = 0; k < top_k.size(); ++k) {
       std::cout << "\t" << recalls[k] / nq / top_k[k];
     }
@@ -163,7 +241,7 @@ void cgk_rank(
  * @return
  */
 int main(int argc, char **argv) {
-  if (argc != 8) {
+  if (argc < 8) {
     fprintf(stderr, "usage: ./bin cgk_l num_cgk num_hash num_bits "
                     "base_location query_location ground_truth\n");
     return 0;
@@ -177,8 +255,9 @@ int main(int argc, char **argv) {
   string base_location = argv[5];
   string query_location = argv[6];
   string ground_truth = argv[7];
-//  string base_embedding = argv[8];
-//  string query_embedding = argv[9];
+  string base_embedding = argv[8];
+  string query_embedding = argv[9];
+  bool re_rank = (argc == 11);
 
   size_type num_dict = 0;
   size_type num_base = 0;
@@ -197,16 +276,26 @@ int main(int argc, char **argv) {
   cout << "loaded query data, num dict " << num_dict
        << " nq: " << query_strings.size() << endl;
 
+  cout << "loading ground_truth";
   cnpy::NpyArray np_gt = cnpy::npy_load(ground_truth);
-//  cnpy::NpyArray np_xb = cnpy::npy_load(base_embedding);
-//  cnpy::NpyArray np_xq = cnpy::npy_load(query_location);
+  cout <<  np_gt.shape[0] << "x" << np_gt.shape[1] << endl;
+
+  cout << "loading base_embedding" << endl;
+  cnpy::NpyArray np_xb = cnpy::npy_load(base_embedding);
+  cout << np_xb.shape[0] << "x" << np_xb.shape[1] << endl;
+  cout << "loading query_embedding" ;
+  cnpy::NpyArray np_xq = cnpy::npy_load(query_embedding);
+  cout << np_xq.shape[0] << "x" << np_xq.shape[1] << endl;
   const int* ed = np_gt.data<int >();
-//  const float* xb = np_xb.data<float >();
-//  const float* xq = np_xq.data<float >();
+  const float* xb = np_xb.data<float >();
+  const float* xq = np_xq.data<float >();
+  const size_t d = np_xb.shape[1];
+
+  embed_rank(query_strings, base_strings,
+             xb, xq, d, ed, re_rank);
 
   cgk_rank(query_strings, base_strings,
            num_cgk, num_hash, num_bits,
-           cgk_l, num_dict, signatures, ed);
-
+           cgk_l, num_dict, signatures, ed, re_rank);
   return 0;
 }
