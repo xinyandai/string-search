@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <random>
 #include <omp.h>
+#include <boost/progress.hpp>
 
 #include "utils.h"
 
@@ -104,8 +105,15 @@ class CGKRanker {
   void add(const vector<string>& xs) {
     assert(embed_string_.empty());
     embed_string_ = vector<string >(xs.size(), "");
+
+    boost::progress_display progress_embed(xs.size());
+
 #pragma omp parallel for
     for (int i = 0; i < xs.size(); ++i) {
+#pragma omp critical
+      {
+        ++progress_embed;
+      }
       embed_string_[i] = embed(xs[i]);
     }
   }
@@ -113,7 +121,7 @@ class CGKRanker {
   vector<int > query(const string& x) const {
     vector<int > dist(embed_string_.size(), 0);
     string cgk_x = embed(x);
-#pragma omp parallel for
+
     for (int i = 0; i < dist.size(); ++i) {
       dist[i] = hamming_dist(cgk_x, embed_string_[i]);
     }

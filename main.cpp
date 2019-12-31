@@ -1,9 +1,9 @@
 #include <algorithm>
 #include <cnpy.h>
-#include <boost/progress.hpp>
 
 #include "utils.h"
 #include "cgk_embed.h"
+#include "edit_distance.h"
 
 using namespace std;
 using size_type = unsigned;
@@ -36,6 +36,28 @@ void load_data(
 
 }
 
+vector<size_t > re_rank(
+  const vector<size_t >& idx,
+  size_type  num_prob,
+  const string& query,
+  const vector<string >& base_strings) {
+
+  auto nb = (size_type)idx.size();
+  assert(nb == base_strings.size());
+
+  num_prob = std::min(num_prob, nb);
+  vector<size_type > dist(num_prob, 0);
+  for (int i = 0; i < num_prob; ++i) {
+    dist[i] = edit_distance(query, base_strings[idx[i]]);
+  }
+
+  vector<size_t > res = arg_sort(dist);
+  for (int i = 0; i < num_prob; ++i) {
+    res[i] = idx[res[i]];
+  }
+  return res;
+}
+
 
 void cgk_rank(
   const vector<string >& query_strings,
@@ -63,6 +85,7 @@ void cgk_rank(
     vector<vector<int> > dist(nq, vector<int>());
     cout << "compute hamming distance" << endl;
     boost::progress_display progress_dist(nq);
+
 #pragma omp parallel for
     for (int i = 0; i < nq; ++i) {
 #pragma omp critical
@@ -72,12 +95,10 @@ void cgk_rank(
       dist[i] = ranker.query(query_strings[i]);
     }
 
-    cout << "rank by hamming distance" << endl;
     boost::progress_display progress_sort(nq);
 
 #pragma omp parallel for
     for (int i = 0; i < nq; ++i) {
-
 #pragma omp critical
       {
         ++progress_sort;
@@ -89,35 +110,41 @@ void cgk_rank(
   cout << "compute recalls" << endl;
   vector<size_type > top_k = {1, 10, 20, 50, 100, 1000};
   vector<size_type > probed;
-  size_type num_prob = 20;
-  probed.reserve(num_prob);
-  for (int i = 0; i < num_prob; ++i) {
+  const size_type varies_prob = 20;
+  probed.reserve(varies_prob);
+  for (int i = 0; i < varies_prob; ++i) {
     probed.push_back((size_type)1 << i);
   }
 
   for (int j = 0; j < probed.size(); ++j) {
+    const size_type num_prob = probed[j];
+
     vector<double > recalls(top_k.size(), 0);
+    vector<vector<size_t > > re_rank_idx(nq);
+
+    boost::progress_display progress_rank(nq);
+
+#pragma omp parallel for
+    for (int i = 0; i < nq; ++i) {
+#pragma omp critical
+      {
+        ++progress_rank;
+      }
+      re_rank_idx[i] = re_rank(idx[i], num_prob, query_strings[i], base_strings);
+    }
 
 #pragma omp parallel for
     for (int k = 0; k < top_k.size(); ++k) {
       for (int i = 0; i < nq; ++i) {
-
-        recalls[k] += std::count_if(
-          idx[i].begin(), probed[j] < nb ? idx[i].begin() + probed[j] : idx[i].end(),
-          [nb, &top_k, ed, i, k] (const size_t id) {
-            for (int l = 0; l < top_k[k]; ++l) {
-              if (id == ed[i * nb + l])
-                return true;
-            }
-            return false;
-          });
+        recalls[k] += intersection_size(
+          re_rank_idx[i].begin(), re_rank_idx[i].end(),
+          &ed[i * nb], &ed[i * nb + top_k[k]]);
       }
-      recalls[k] /= nq * top_k[k];
     }
 
     std::cout << probed[j];
     for (int k = 0; k < top_k.size(); ++k) {
-      std::cout << "\t" << recalls[k];
+      std::cout << "\t" << recalls[k] / nq / top_k[k];
     }
     std::cout << std::endl;
   }
@@ -150,6 +177,8 @@ int main(int argc, char **argv) {
   string base_location = argv[5];
   string query_location = argv[6];
   string ground_truth = argv[7];
+//  string base_embedding = argv[8];
+//  string query_embedding = argv[9];
 
   size_type num_dict = 0;
   size_type num_base = 0;
@@ -168,11 +197,16 @@ int main(int argc, char **argv) {
   cout << "loaded query data, num dict " << num_dict
        << " nq: " << query_strings.size() << endl;
 
-  cnpy::NpyArray load_np = cnpy::npy_load(ground_truth);
-  const int* ed = load_np.data<int >();
+  cnpy::NpyArray np_gt = cnpy::npy_load(ground_truth);
+//  cnpy::NpyArray np_xb = cnpy::npy_load(base_embedding);
+//  cnpy::NpyArray np_xq = cnpy::npy_load(query_location);
+  const int* ed = np_gt.data<int >();
+//  const float* xb = np_xb.data<float >();
+//  const float* xq = np_xq.data<float >();
 
   cgk_rank(query_strings, base_strings,
-      num_cgk, num_hash, num_bits, cgk_l, num_dict, signatures, ed);
+           num_cgk, num_hash, num_bits,
+           cgk_l, num_dict, signatures, ed);
 
   return 0;
 }

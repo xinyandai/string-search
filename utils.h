@@ -13,6 +13,34 @@ using std::string;
 using std::vector;
 
 
+struct Counter {
+  struct value_type {
+    template<typename T> value_type(const T&) { }
+  };
+  void push_back(const value_type&) {
+    ++count;
+  }
+  size_t count = 0;
+};
+
+template<
+  typename _InputIterator1,
+  typename _InputIterator2>
+size_t intersection_size(
+  _InputIterator1 __first1,
+  _InputIterator1 __last1,
+  _InputIterator2 __first2,
+  _InputIterator2 __last2) {
+  Counter c;
+  set_intersection(
+    __first1, __last1,
+    __first2, __last2,
+    std::back_inserter(c));
+  return c.count;
+}
+
+
+
 template <typename T>
 vector<size_t> arg_sort(const vector<T> &v) {
 
