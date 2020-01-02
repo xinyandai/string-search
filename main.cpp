@@ -14,8 +14,13 @@
 
 using namespace std;
 
-const vector<size_type > top_k = {1, 10, 20, 50, 100, 1000};
-const vector<size_type > probed = {1, 4, 16, 64, 256, 1024, 4096};
+const vector<size_type > top_k = {
+  1, 10, 20, 50, 100, 1000
+};
+const vector<size_type > probed = {
+  1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024,
+  2048, 4096, 8192, 16384, 32768, 65536
+};
 
 void load_data(
   const string& str_location,
