@@ -6,6 +6,7 @@
 
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexIVFPQ.h>
+#include <faiss/IndexIVFFlat.h>
 
 #include "utils.h"
 #include "cgk_embed.h"
@@ -52,17 +53,20 @@ void embed_rank(
 
   auto nb  = (size_type)base_strings.size();
   auto nq  = (size_type)query_strings.size();
+  auto nt = std::min((size_type)10000, nb);
+
   size_t n_list = 100;
-  size_t m = 8;
   faiss::IndexFlatL2 q(d);
+  size_t m = 8;
+  assert (d % m == 0);
   faiss::IndexIVFPQ index(&q, d, n_list, m, 8);
   timer time_recorder;
 
   cout << "training index" << endl;
-  index.train(nb, xb);
+  index.train(nt, xb);
   cout << "add base to index" << endl;
   index.add(nb, xb);
-
+  cout << "done adding items" << endl;
   for (int j = 0; j < probed.size(); ++j) {
     const size_type num_prob = probed[j];
 
@@ -72,7 +76,6 @@ void embed_rank(
 
     index.nprobe = num_prob;
     time_recorder.restart();
-    cout << "searching " << endl;
     index.search(nq, xq, num_prob, D, I);
     double embed_rank_time = time_recorder.elapsed();
 
@@ -85,9 +88,8 @@ void embed_rank(
 
 #pragma omp parallel for
       for (int i = 0; i < nq; ++i) {
-        re_rank_idx[i] = ed_rank(&I[i * nb], num_prob, query_strings[i], base_strings);
+        re_rank_idx[i] = ed_rank(&I[i * num_prob], num_prob, query_strings[i], base_strings);
       }
-
       re_rank_time = time_recorder.elapsed();
 
 #pragma omp parallel for
@@ -97,9 +99,8 @@ void embed_rank(
             re_rank_idx[i].begin(), re_rank_idx[i].end(),
             &ed[i * nb], &ed[i * nb + top_k[k]]);
         }
-      }
-    }
-
+      } // end computing recalls of ks
+    } // end if (re_rank)
     else {
 #pragma omp parallel for
       for (int k = 0; k < top_k.size(); ++k) {
@@ -113,10 +114,9 @@ void embed_rank(
               }
               return false;
             });
-        }
-      }
-
-    }
+        } // end of computing k recalls
+      } // end of calling omp parallel
+    } // end else [if (re_rank)]
 
     std::cout << probed[j] << "\t" << embed_rank_time << "\t" << re_rank_time ;
     for (int k = 0; k < top_k.size(); ++k) {
@@ -163,7 +163,6 @@ void cgk_rank(
       dist[i] = ranker.query(query_strings[i]);
     }
 
-    boost::progress_display progress_sort(nq);
 
 #pragma omp parallel for
     for (int i = 0; i < nq; ++i) {
@@ -171,7 +170,6 @@ void cgk_rank(
     }
   }
   double embed_rank_time = time_recorder.elapsed();
-
 
   cout << "compute recalls" << endl;
 
@@ -200,7 +198,7 @@ void cgk_rank(
         }
       }
     }
-
+    // end if (re_rank)
     else {
 
 #pragma omp parallel for
@@ -226,6 +224,7 @@ void cgk_rank(
     }
     std::cout << std::endl;
   }
+  // end else [if (re_rank)]
 
 }
 

@@ -8,12 +8,17 @@
 #include <sstream>
 #include <fstream>
 #include <string.h>
+#include <chrono>
+#include <ctime>
 #include <time.h>
-#include "edit_distance.h"
+
 
 using std::string;
+using std::min;
+using std::pair;
 using std::vector;
 using size_type = unsigned;
+
 
 struct Counter {
   struct value_type {
@@ -24,6 +29,7 @@ struct Counter {
   }
   size_t count = 0;
 };
+
 
 template<
   typename _InputIterator1,
@@ -42,9 +48,47 @@ size_t intersection_size(
 }
 
 
+int hamming_dist(const string& a, const string& b) {
+  int dist = std::abs((int)a.size() - (int)b.size());
+  for (int i = 0; i < min(a.size(), b.size()); ++i) {
+    if (a[i]!=b[i])
+      dist++;
+  }
+  return dist;
+}
+
+
+int edit_distance(const string & a, const string& b) {
+  int na = (int) a.size();
+  int nb = (int) b.size();
+
+  vector<int> f(nb+1, 0);
+  for (int j = 1; j <= nb; ++j) {
+    f[j] = j;
+  }
+
+  for (int i = 1; i <= na; ++i) {
+    int prev = i;
+    for (int j = 1; j <= nb; ++j) {
+      int cur;
+      if (a[i-1] == b[j-1]) {
+        cur = f[j-1];
+      }
+      else {
+        cur = min(min(f[j-1], prev), f[j]) + 1;
+      }
+
+      f[j-1] = prev;
+      prev = cur;
+    }
+    f[nb] = prev;
+  }
+  return f[nb];
+}
+
+
 template <typename T>
 vector<size_t> arg_sort(const vector<T> &v) {
-
   // initialize original index locations
   vector<size_t> idx(v.size());
   iota(idx.begin(), idx.end(), 0);
@@ -71,7 +115,7 @@ vector<size_t > ed_rank(
   num_prob = std::min(num_prob, nb);
   vector<size_type > dist(num_prob, 0);
   for (int i = 0; i < num_prob; ++i) {
-    dist[i] = edit_distance(query, base_strings[idx[i]]);
+    dist[i] = (size_type)edit_distance(query, base_strings[idx[i]]);
   }
 
   vector<size_t > res = arg_sort(dist);
@@ -82,41 +126,22 @@ vector<size_t > ed_rank(
 }
 
 
-int hamming_dist(const string& a, const string& b) {
-  int dist = 0;
-  if (a.size() != b.size()) {
-    dist = std::abs((int)a.size() - (int)b.size());
-  }
-  for (int i = 0; i < std::min(a.size(), b.size()); ++i) {
-    if (a[i]!=b[i])
-      dist++;
-  }
-  return dist;
-}
-
-
-/**
- * A timer object measures elapsed time, and it is very similar to boost::timer.
- */
+/** A timer object measures elapsed time,
+ * and it is very similar to boost::timer. */
 class timer {
  public:
-  timer(): time(static_cast<double>(clock())) {}
-  ~timer() {}
-
-  /**
-   * Restart the timer.
-   */
+  timer() { restart(); }
+  ~timer() = default;
+  /** Restart the timer. */
   void restart() {
-    time = static_cast<double>(clock());
+    t_start = std::chrono::high_resolution_clock::now();
   }
-  /**
-   * Measures elapsed time.
-   * @return The elapsed time
-   */
+  /** @return The elapsed time */
   double elapsed() {
-    return (static_cast<double>(clock()) - time) / CLOCKS_PER_SEC;
+    auto t_end = std::chrono::high_resolution_clock::now();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
   }
 
  private:
-  double time;
+  std::chrono::high_resolution_clock::time_point t_start;
 };
