@@ -54,7 +54,9 @@ void embed_rank(
   const vector<string >& query_strings,
   const vector<string >& base_strings,
   const float* xb, const float* xq,
-  const size_t d, const int* ed, const bool re_rank) {
+  const size_t d,
+  const vector<vector<size_t > >& q_knn,
+  const bool re_rank) {
 
   auto nb  = (size_type)base_strings.size();
   auto nq  = (size_type)query_strings.size();
@@ -78,7 +80,6 @@ void embed_rank(
     long *I = new long[num_prob * nq];
     float *D = new float[num_prob * nq];
 
-
     index.nprobe = num_prob;
     time_recorder.restart();
     index.search(nq, xq, num_prob, D, I);
@@ -101,8 +102,10 @@ void embed_rank(
       for (int k = 0; k < top_k.size(); ++k) {
         for (int i = 0; i < nq; ++i) {
           recalls[k] += intersection_size(
-            re_rank_idx[i].begin(), re_rank_idx[i].end(),
-            &ed[i * nb], &ed[i * nb + top_k[k]]);
+            re_rank_idx[i].begin(),
+            re_rank_idx[i].end(),
+            q_knn[i].begin(),
+            top_k[k] < q_knn[i].size() ? q_knn[i].begin() + top_k[k] : q_knn[i].end());
         }
       } // end computing recalls of ks
     } // end if (re_rank)
@@ -112,9 +115,9 @@ void embed_rank(
         for (int i = 0; i < nq; ++i) {
           recalls[k] += std::count_if(
             &I[i * num_prob], &I[(i + 1) * num_prob],
-            [nb, ed, i, k] (const long id) {
+            [nb, &q_knn, i, k] (const long id) {
               for (int l = 0; l < top_k[k]; ++l) {
-                if (id == (size_t)ed[i * nb + l])
+                if (id == (size_t)q_knn[i][l])
                   return true;
               }
               return false;
@@ -139,12 +142,11 @@ void cgk_rank(
   const vector<string >& query_strings,
   const vector<string >& base_strings,
   const size_type  num_cgk,
-  const size_type  num_hash,
   const size_type  num_bits,
   const size_type  cgk_l,
   const size_type  num_dict,
   const vector<size_type > & signatures,
-  const int* ed,
+  const vector<vector<size_t > >& q_knn,
   bool re_rank) {
 
   auto nb  = (size_type)base_strings.size();
@@ -198,8 +200,10 @@ void cgk_rank(
       for (int k = 0; k < top_k.size(); ++k) {
         for (int i = 0; i < nq; ++i) {
           recalls[k] += intersection_size(
-            re_rank_idx[i].begin(), re_rank_idx[i].end(),
-            &ed[i * nb], &ed[i * nb + top_k[k]]);
+            re_rank_idx[i].begin(),
+            re_rank_idx[i].end(),
+            q_knn[i].begin(),
+            top_k[k] < q_knn[i].size() ? q_knn[i].begin() + top_k[k] : q_knn[i].end());
         }
       }
     }
@@ -211,9 +215,9 @@ void cgk_rank(
         for (int i = 0; i < nq; ++i) {
           recalls[k] += std::count_if(
             idx[i].begin(), probed[j] < nb ? idx[i].begin() + probed[j] : idx[i].end(),
-            [nb, ed, i, k] (const size_t id) {
+            [nb, &q_knn, i, k] (const size_t id) {
               for (int l = 0; l < top_k[k]; ++l) {
-                if (id == ed[i * nb + l])
+                if (id == q_knn[i][l])
                   return true;
               }
               return false;
@@ -253,8 +257,8 @@ int main(int argc, char **argv) {
 
   auto cgk_l = (size_type)atoi(argv[1]);
   auto num_cgk = (size_type)atoi(argv[2]);
-  auto num_hash = (size_type)atoi(argv[3]);
-  auto num_bits = (size_type)atoi(argv[4]);
+  auto num_bits = (size_type)atoi(argv[3]);
+  auto max_nb = (size_type)atoi(argv[4]);
 
   string base_location = argv[5];
   string query_location = argv[6];
@@ -280,17 +284,44 @@ int main(int argc, char **argv) {
   cout << "loaded query data, num dict " << num_dict
        << " nq: " << query_strings.size() << endl;
 
-  cout << "loading ground_truth";
-  cnpy::NpyArray np_gt = cnpy::npy_load(ground_truth);
-  cout <<  np_gt.shape[0] << "x" << np_gt.shape[1] << endl;
+  auto nb  = std::min((size_type)base_strings.size(), max_nb);
+  base_strings.resize(nb);
 
-  cout << "loading base_embedding" << endl;
+  auto nq  = (size_type)query_strings.size();
+
+  vector<vector<size_t > > ed(nq);
+  {
+    cout << "loading ground_truth ";
+    cnpy::NpyArray np_gt = cnpy::npy_load(ground_truth);
+    cout <<  np_gt.shape[0] << "x" << np_gt.shape[1] << endl;
+    cout << "per point size " <<  np_gt.num_bytes() / np_gt.shape[0] / np_gt.shape[1] << endl;
+    const int64_t* qd = np_gt.data<int64_t >();
+    size_t nd = np_gt.shape[1];
+    if (np_gt.fortran_order) {
+#pragma omp parallel for
+      for (int i = 0; i < nq; ++i) {
+        ed[i] = arg_sort(&qd[i], std::min(nd, (size_t)nb), nq);
+      }
+    } else {
+#pragma omp parallel for
+      for (int i = 0; i < nq; ++i) {
+        ed[i] = arg_sort(&qd[i*nd], std::min(nd, (size_t)nb), 0);
+      }
+    }
+
+  }
+
+  cout << "loading base_embedding ";
   cnpy::NpyArray np_xb = cnpy::npy_load(base_embedding);
   cout << np_xb.shape[0] << "x" << np_xb.shape[1] << endl;
-  cout << "loading query_embedding" ;
+
+  cout << "loading query_embedding " ;
   cnpy::NpyArray np_xq = cnpy::npy_load(query_embedding);
   cout << np_xq.shape[0] << "x" << np_xq.shape[1] << endl;
-  const int* ed = np_gt.data<int >();
+
+
+
+
   const float* xb = np_xb.data<float >();
   const float* xq = np_xq.data<float >();
   const size_t d = np_xb.shape[1];
@@ -299,7 +330,7 @@ int main(int argc, char **argv) {
              xb, xq, d, ed, re_rank);
 
   cgk_rank(query_strings, base_strings,
-           num_cgk, num_hash, num_bits,
-           cgk_l, num_dict, signatures, ed, re_rank);
+           num_cgk, num_bits, cgk_l,
+           num_dict, signatures, ed, re_rank);
   return 0;
 }

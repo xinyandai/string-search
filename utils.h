@@ -88,19 +88,26 @@ int edit_distance(const string & a, const string& b) {
 
 
 template <typename T>
-vector<size_t> arg_sort(const vector<T> &v) {
+vector<size_t> arg_sort(const T* v, const size_t size_v, const size_t step) {
   // initialize original index locations
-  vector<size_t> idx(v.size());
+  vector<size_t> idx(size_v);
   iota(idx.begin(), idx.end(), 0);
 
   // sort indexes based on comparing values in v
   std::sort(
     idx.begin(), idx.end(),
-    [&v](size_t i1, size_t i2) {
-      return v[i1] < v[i2];}
-    );
+    [&v, step](size_t i1, size_t i2) {
+      return v[i1 * step] < v[i2 * step];}
+  );
   return idx;
 }
+
+
+template <typename T>
+vector<size_t> arg_sort(const vector<T> &v) {
+  return arg_sort(v.data(), v.size(), 0);
+}
+
 
 
 template <typename idx_type>

@@ -103,17 +103,14 @@ class CGKRanker {
   }
 
   void add(const vector<string>& xs) {
+    size_t max_n = xs.size();
     assert(embed_string_.empty());
-    embed_string_ = vector<string >(xs.size(), "");
+    embed_string_ = vector<string >(max_n, "");
 
-    boost::progress_display progress_embed(xs.size());
+    boost::progress_display progress_embed(max_n);
 
 #pragma omp parallel for
-    for (int i = 0; i < xs.size(); ++i) {
-#pragma omp critical
-      {
-        ++progress_embed;
-      }
+    for (int i = 0; i < max_n; ++i) {
       embed_string_[i] = embed(xs[i]);
     }
   }
