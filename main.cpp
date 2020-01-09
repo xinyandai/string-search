@@ -22,33 +22,6 @@ const vector<size_type > probed = {
   2048, 4096, 8192, 16384, 32768, 65536
 };
 
-void load_data(
-  const string& str_location,
-  vector<string>& strings,
-  vector<size_type >& signatures,
-  size_type& num_dict, size_type& num_str) {
-
-  ifstream  str_reader(str_location);
-
-  num_str = 0;
-
-  string line;
-  while (getline(str_reader, line)) {
-    // record the string
-    strings.push_back(line);
-    // record the number of strings
-    num_str++;
-    // record the signatures and the number of identical characters
-
-    for (char c : line) {
-      if (signatures[c] == 1024) {
-        signatures[c] = num_dict++;
-      }
-    }
-  }
-
-}
-
 
 void embed_rank(
   const vector<string >& query_strings,
@@ -318,9 +291,7 @@ int main(int argc, char **argv) {
   cout << "loading query_embedding " ;
   cnpy::NpyArray np_xq = cnpy::npy_load(query_embedding);
   cout << np_xq.shape[0] << "x" << np_xq.shape[1] << endl;
-
-
-
+  assert(np_xb.shape[1] == np_xq.shape[1]);
 
   const float* xb = np_xb.data<float >();
   const float* xq = np_xq.data<float >();

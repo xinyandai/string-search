@@ -12,12 +12,66 @@
 #include <ctime>
 #include <time.h>
 
+#include "verification.h"
+
 
 using std::string;
+using std::ifstream;
 using std::min;
 using std::pair;
 using std::vector;
 using size_type = unsigned;
+
+#ifndef FINTEGER
+#define FINTEGER long
+#endif
+
+extern "C" {
+/* declare BLAS functions, see http://www.netlib.org/clapack/cblas/ */
+int
+sgemm_ (
+  const char *transa, const char *transb,
+  FINTEGER *m, FINTEGER * n, FINTEGER *k,
+  const float *alpha, const float *a,
+  FINTEGER *lda, const float *b, FINTEGER *ldb,
+  float *beta, float *c, FINTEGER *ldc);
+
+int dgemm_(
+  char *transa, char *transb,
+  FINTEGER *m, FINTEGER *n, FINTEGER *k,
+  const double *alpha, const double *a,
+  FINTEGER *lda, const double *b, FINTEGER *ldb,
+  const double *beta, const double *c, FINTEGER *ldc);
+}
+
+
+void load_data(
+  const string& str_location,
+  vector<string>& strings,
+  vector<size_type >& signatures,
+  size_type& num_dict, size_type& num_str) {
+
+  ifstream  str_reader(str_location);
+
+  num_str = 0;
+
+  string line;
+  while (getline(str_reader, line)) {
+    // record the string
+    strings.push_back(line);
+    // record the number of strings
+    num_str++;
+    // record the signatures and the number of identical characters
+
+    for (char c : line) {
+      if (signatures[c] == 1024) {
+        signatures[c] = num_dict++;
+      }
+    }
+  }
+  str_reader.close();
+
+}
 
 
 struct Counter {
@@ -58,33 +112,9 @@ int hamming_dist(const string& a, const string& b) {
 }
 
 
-int edit_distance(const string & a, const string& b) {
-  int na = (int) a.size();
-  int nb = (int) b.size();
 
-  vector<int> f(nb+1, 0);
-  for (int j = 1; j <= nb; ++j) {
-    f[j] = j;
-  }
 
-  for (int i = 1; i <= na; ++i) {
-    int prev = i;
-    for (int j = 1; j <= nb; ++j) {
-      int cur;
-      if (a[i-1] == b[j-1]) {
-        cur = f[j-1];
-      }
-      else {
-        cur = min(min(f[j-1], prev), f[j]) + 1;
-      }
 
-      f[j-1] = prev;
-      prev = cur;
-    }
-    f[nb] = prev;
-  }
-  return f[nb];
-}
 
 
 template <typename T>

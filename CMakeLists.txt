@@ -1,10 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 project(string_search)
 
-set(CMAKE_CXX_STANDARD 14)
-
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-
+SET( CMAKE_CXX_FLAGS
+        "${CMAKE_CXX_FLAGS} -Ofast -lrt -lm -DNDEBUG -std=c++17 -DHAVE_CXX0X -openmp -march=native -mtune=generic -fpic -w -fopenmp -ftree-vectorize -ftree-vectorizer-verbose=0" )
 find_package( PkgConfig )
 find_package(OpenMP)
 find_package(Boost COMPONENTS)
@@ -16,10 +14,17 @@ if (OPENMP_FOUND)
     set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
+find_package( BLAS REQUIRED )
+message( STATUS BLAS found: ${BLAS_LIBRARIES} )
+
+
 link_libraries(-lpthread)
 link_libraries(-lcnpy)
 link_libraries(-lfaiss)
 link_libraries(-lz)
 
 add_executable(string_search main.cpp)
+add_executable(gt gt.cc)
+add_executable(join join.cc)
+target_link_libraries(join ${BLAS_LIBRARIES})
 target_link_libraries(string_search ${Boost_LIBRARIES})
