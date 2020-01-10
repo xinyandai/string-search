@@ -15,9 +15,9 @@
 #include "utils.h"
 #include "simd.h"
 #include "cgk_embed.h"
-
 using namespace std;
 using std::ofstream;
+
 
 /***
  * \cgk_l: the length of truncation, recommended to be the average length of strings
@@ -73,36 +73,30 @@ int main(int argc, char **argv) {
   cout << "loading base_embedding ";
   cnpy::NpyArray np_xb = cnpy::npy_load(embed_location);
   cout << np_xb.shape[0] << "x" << np_xb.shape[1] << endl;
-
+  FINTEGER D = np_xb.shape[1];
   const float* xb = np_xb.data<float >();
-  FINTEGER M = np_xb.shape[0], N = np_xb.shape[0], D = np_xb.shape[1];
-  assert(M == nb);
-  cout << "Allocating " << M  << "X" << M  << endl;
-  float * out = new float[1LL * M * M];
-  float alpha = -2.0f, beta = 0.0f;
-  FINTEGER LDA = D;
-  FINTEGER LDB = D;
-  FINTEGER LDC = M;
-  cout << "Allocating " << "Allocating result queue" << endl;
+
   vector<pair<int, int > > res;
   res.reserve(1024);
 
   timer timer_recorder;
-  cout << "calling sgemm " << endl;
-  sgemm_("T", "N", &M, &N, &D,
-         &alpha, xb, &LDA, xb, &LDB,
-         &beta, out, &LDC);
-  cout << "calling sqr " << endl;
+  cout << "calculating sqr ";
   float *nsqr = new float[nb];
-  for (int i = 0; i < M; ++i) {
+  for (int i = 0; i < nb; ++i) {
     nsqr[i] = fvec_norm_L2sqr(&xb[i * D], D);
   }
 
-  cout << "adding sqr " << endl;
+  cout << "filtering" << endl;
   size_t can = 0;
-  for (int i = 0; i < M; ++i) {
-    for (int j = i + 1; j < M; ++j) {
-      if (out[i * M + j] + nsqr[i] + nsqr[j] <= threshold_l2) {
+  boost::progress_display progress(nb);
+#pragma omp parallel for
+  for (size_type i = 0; i < nb - 1; ++i) {
+#pragma omp critical
+    {
+      ++progress;
+    }
+    for (int j = i + 1; j < nb; ++j) {
+      if (-2.0f * fvec_inner_product(&xb[i * D], &xb[j * D], D) + nsqr[i] + nsqr[j] <= threshold_l2) {
         int ed = edit_distance(
           oridata_modified[j].data(),
           base_strings[j].size(),
@@ -110,22 +104,25 @@ int main(int argc, char **argv) {
           base_strings[i].size(), threshold_ed);
 
         if (ed != -1 )
+#pragma omp critical
+        {
           res.emplace_back(i, j);
+        }
 	    can++;
       }
     }
   }
+
   cout << "Time  " << timer_recorder.elapsed() << endl;
   cout << "size  " << can << endl;
   cout << "size  " << res.size() << endl;
 
   ofstream output_sream(bench_file);
   for (auto& p : res) {
-    output_sream << p.first << "\t" << p.second << endl;
+    output_sream << p.first << " " << p.second << endl;
   }
   output_sream.close();
 
-  delete [] out;
   delete [] nsqr;
   return 0;
 }
