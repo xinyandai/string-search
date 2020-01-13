@@ -124,8 +124,8 @@ void embed_rank(
  */
 int main(int argc, char **argv) {
   if (argc < 6) {
-    fprintf(stderr, "usage: ./bin cgk_l num_cgk num_hash num_bits "
-                    "base_location query_location ground_truth\n");
+    fprintf(stderr, "usage: ./bin base_embedding query_embedding  "
+                    "base_location query_location ground_truth alpha\n");
     return 0;
   }
 
