@@ -18,10 +18,6 @@
 
 using namespace std;
 using namespace faiss;
-const vector<float > scales = {
-  1.0f/32, 1.0f/16, 1.0f/8, 1.0f/4, 1.0f / 2, 1.0f,
-  1.0f*2 , 1.0f*4, 1.0f*8, 1.0f*16, 1.0f * 32, 1.0f * 64
-};
 
 
 std::pair<double, double>
@@ -98,7 +94,8 @@ void embed_rank(
   const float* xq,
   const size_t d,
   const int64_t threshold,
-  const float threshold_l2) {
+  const float threshold_l2,
+  const float step) {
 
   auto nb  = (size_type)base_strings.size();
   auto nq  = (size_type)query_strings.size();
@@ -120,13 +117,14 @@ void embed_rank(
   pq.compute_distance_tables(nq, xq, dis_tables.get());
   double compute_dt_time = t.elapsed();
   cout << "searching " << endl;
-  for (float scale : scales) {
+  for (int i = 0; i < 10; i++) {
+    float th_i = threshold_l2 + i * step;
     auto recall_time = search(pq, codes.get(), dis_tables.get(),
                               query_strings, base_strings,
                               query_modified, base_modified,
-                              q_knn, xq, threshold, threshold_l2 * scale);
+                              q_knn, xq, threshold, th_i);
     std::cout
-      << threshold_l2 * scale << "\t"
+      << th_i << "\t"
       << recall_time.second + compute_dt_time << "\t"
       << recall_time.first
       << std::endl;
@@ -146,7 +144,7 @@ void embed_rank(
 int main(int argc, char **argv) {
   if (argc < 8) {
     fprintf(stderr, "usage: ./bin threshold threshold_l2 base_embedding query_embedding "
-                    "base_location query_location ground_truth\n");
+                    "base_location query_location ground_truth step\n");
     return 0;
   }
 
@@ -157,6 +155,11 @@ int main(int argc, char **argv) {
   string base_location = argv[5];
   string query_location = argv[6];
   string ground_truth = argv[7];
+  float step = 0.01f;
+  if (argc > 8) {
+    step = (float)atof(argv[8]);
+  }
+
 
   size_type num_dict = 0;
   size_type nb = 0;
@@ -219,6 +222,6 @@ int main(int argc, char **argv) {
 
   embed_rank( query_strings, base_strings,
               query_modified, base_modified,
-              q_knn, xb, xq, d, threshold, threshold_l2);
+              q_knn, xb, xq, d, threshold, threshold_l2, step);
   return 0;
 }
