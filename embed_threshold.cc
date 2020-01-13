@@ -4,11 +4,10 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include <faiss/AuxIndexStructures.h>
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexIVFPQ.h>
 #include <faiss/IndexIVFFlat.h>
-#include <faiss/ProductQuantizer.h>
+#include <faiss/impl/ProductQuantizer.h>
 
 #include "utils.h"
 #include "cgk_embed.h"
