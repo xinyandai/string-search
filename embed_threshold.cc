@@ -107,12 +107,12 @@ void embed_rank(
   cout << "training PQ" << endl;
   pq.train(nt, xb);
   cout << "compute codes" << endl;
-  std::shared_ptr<uint8_t[]>  codes(new uint8_t[nb * M]);
+  std::shared_ptr<uint8_t> codes(new uint8_t[nb * M], std::default_delete<uint8_t[]>());
   pq.compute_codes(xb, codes.get(), nb);
   cout << "computing distance tables" << endl;
 
   timer t;
-  std::shared_ptr<float[]> dis_tables(new float[nq * M * ksub]);
+  std::shared_ptr<float> dis_tables(new float[nq * M * ksub], std::default_delete<float[]>());
   pq.compute_distance_tables(nq, xq, dis_tables.get());
   double compute_dt_time = t.elapsed();
   cout << "searching " << endl;
