@@ -133,4 +133,3 @@ class CGKRanker {
   vector<vector<size_type > > hash_lsh_;
   vector<CGKEmbed > cgk_embed_;
 };
-

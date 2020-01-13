@@ -38,7 +38,7 @@ int edit_distance(const string & a, const string& b) {
 }
 
 
-#define K  (20000)
+#define PRUNE_K  (20000)
 
 typedef int64_t int64;
 typedef int32_t int32;
@@ -93,19 +93,19 @@ int edit_distance(const char *x, const int x_len, const  char *y, const int y_le
 // x and y should be zero terminated plus there should be 7 characters afterwards that are different for x and y
 // (we don't really need zero termination but we need 8 characters after x and y that differ)
 {
-  if(k >= K)return -1;			// error - too large k
+  if(k >= PRUNE_K)return -1;			// error - too large k
 
   if(x_len > y_len)return edit_distance(y,y_len,x,x_len,k);
 
-  int fc_buf[2*K+1],fp_buf[2*K+1];        // must be at least 2k+3
+  int fc_buf[2*PRUNE_K+1],fp_buf[2*PRUNE_K+1];        // must be at least 2k+3
   int *fc,*fp;				// current F(d,h) and previous F(d,h-1)
   int h,dl,du,d;
 
-  fc_buf[K]=fp_buf[K]=-1;
+  fc_buf[PRUNE_K]=fp_buf[PRUNE_K]=-1;
 
   for(h=0;h <= k; h++){
 
-    if( (h&1)==0 ){ fc=fc_buf+K; fp=fp_buf+K; }else{ fc=fp_buf+K; fp=fc_buf+K; }
+    if( (h&1)==0 ){ fc=fc_buf+PRUNE_K; fp=fp_buf+PRUNE_K; }else{ fc=fp_buf+PRUNE_K; fp=fc_buf+PRUNE_K; }
 
     dl = - min( 1+((k-(y_len-x_len))/2), h);	// compute the range of relevant diagonals
     du =   min( 1+k/2+(y_len-x_len), h);

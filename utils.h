@@ -3,7 +3,9 @@
 //
 
 #pragma once
+#include <algorithm>
 #include <vector>
+#include <numeric>
 #include <iostream>
 #include <sstream>
 #include <fstream>
@@ -12,11 +14,16 @@
 #include <ctime>
 #include <time.h>
 
+#include "heap.h"
 #include "verification.h"
 
 
 using std::string;
 using std::ifstream;
+using std::ofstream;
+using std::endl;
+using std::cout;
+using std::iota;
 using std::min;
 using std::pair;
 using std::vector;
@@ -45,11 +52,10 @@ int dgemm_(
 }
 
 
-void load_data(
-  const string& str_location,
-  vector<string>& strings,
-  vector<size_type >& signatures,
-  size_type& num_dict, size_type& num_str) {
+void load_data( const string& str_location,
+                vector<string>& strings,
+                vector<size_type >& signatures,
+                size_type& num_dict, size_type& num_str) {
 
   ifstream  str_reader(str_location);
 
@@ -113,12 +119,10 @@ int hamming_dist(const string& a, const string& b) {
 
 
 
-
-
-
-
 template <typename T>
-vector<size_t> arg_sort(const T* v, const size_t size_v, const size_t step) {
+vector<size_t> arg_sort(const T* v,
+                        const size_t size_v,
+                        const size_t step) {
   // initialize original index locations
   vector<size_t> idx(size_v);
   iota(idx.begin(), idx.end(), 0);
@@ -138,6 +142,22 @@ vector<size_t> arg_sort(const vector<T> &v) {
   return arg_sort(v.data(), v.size(), 0);
 }
 
+
+template <typename T>
+vector<size_t> where_smaller(const T* v,
+                             const size_t size_v,
+                             const size_t step,
+                             T threshold) {
+  // initialize original index locations
+  vector<size_t> idx = arg_sort(v, size_v, step);
+  for (int i = 0; i < idx.size(); ++i) {
+    if (v[idx[i] * step] > threshold) {
+      idx.resize(i);
+      return idx;
+    }
+  }
+  return idx;
+}
 
 
 template <typename idx_type>
@@ -160,6 +180,70 @@ vector<size_t > ed_rank(
     res[i] = idx[res[i]];
   }
   return res;
+}
+template <typename idx_type>
+vector<size_t > ed_rank(
+  const idx_type* idx,
+  const size_type num_prob,
+  const size_type  topk,
+  const string& query,
+  const size_type  query_size,
+  const vector<string >& base_strings,
+  const vector<string >& base_modified) {
+
+  Heap<size_t, int > heap(topk);
+
+  for (size_t k = 0; k < num_prob; ++k) {
+    int threshold = PRUNE_K - 1;
+    int j = idx[k];
+    if(heap.size() == topk) {
+      threshold = heap.top().dist();
+    }
+    int ed = edit_distance(
+      base_modified[j].c_str(),
+      base_strings[j].size(),
+      query.c_str(),
+      query_size,
+      threshold);
+    if (-1 == ed) {
+      continue;
+    }
+    heap.insert(ed, j);
+  }
+
+  auto topks =  heap.topk();
+  vector<size_t > res(topks.size(), 0);
+  for (int i = 0; i < topks.size(); ++i) {
+    res[i] = topks[i].data();
+  }
+  return res;
+}
+
+
+double calculate_recalls(
+  const vector<vector<size_t > >& q_knn,
+  const vector<vector<size_t > >& re_rank_idx,
+  size_t nq, size_t topk) {
+
+  vector<double> recalls(nq, 0);
+#pragma omp parallel for
+  for (int i = 0; i < nq; ++i) {
+    auto q_knn_end = topk < q_knn[i].size() ? q_knn[i].begin() + topk : q_knn[i].end();
+    recalls[i] = intersection_size(
+      re_rank_idx[i].begin(),
+      re_rank_idx[i].end(),
+      q_knn[i].begin(),
+      q_knn_end);
+  }
+  double recall = 0.0;
+  double non_zero = 0.0;
+  for (int i = 0; i < nq; ++i) {
+    recall += recalls[i];
+  }
+  for (int i = 0; i < nq; ++i) {
+    non_zero += std::min(q_knn[i].size(), topk);
+  }
+  return recall / non_zero;
 }
 
 
