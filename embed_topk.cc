@@ -40,7 +40,9 @@ search(
   long *I = new long[num_prob * nq];
   float *D = new float[num_prob * nq];
 
-  index.nprobe = num_prob * alpha;
+  if constexpr (!std::is_same<faiss::IndexFlatL2, INDEX_TYPE>::value) {
+    index.nprobe = num_prob * alpha;
+  }
   timer time_recorder;
   index.search(nq, xq, num_prob, D, I);
 
@@ -72,8 +74,9 @@ void embed_rank(
   size_t alpha) {
 
   auto nb = (size_type)base_strings.size();
-  auto nt = nb;
+  auto nt = std::min(nb, (size_type )50000);
 
+  faiss::IndexFlatL2 index(d);
   /*
   size_t n_list = 1000;
   faiss::IndexFlatL2 q(d);
@@ -81,7 +84,7 @@ void embed_rank(
   assert (d % m == 0);
   faiss::IndexIVFPQ index(&q, d, n_list, m, 8);
   */
-
+  /*
   size_t nhash = 2;
   size_t nbits_subq = int (log2 (nb+1) / 2);        // good choice in general
   size_t ncentroids = 1 << (nhash * nbits_subq);  // total # of centroids
@@ -90,7 +93,7 @@ void embed_rank(
   faiss::MetricType metric = faiss::METRIC_L2; // can be METRIC_INNER_PRODUCT
   faiss::IndexIVFFlat index (&coarse_quantizer, d, ncentroids, metric);
   index.quantizer_trains_alone = true;
-
+  */
   cout << "training index" << endl;
   index.train(nt, xb);
   cout << "add base to index" << endl;
