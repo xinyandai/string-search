@@ -30,15 +30,16 @@ int main(int argc, char **argv) {
        << " nq: " << query_strings.size() << endl;
 
   vector<string > base_modified = base_strings;
+#pragma omp parallel for
   for (int j = 0; j < base_modified.size(); j++){
     for(int k = 0;k < 8; k++) base_modified[j].push_back(j>>(8*k));
   }
   vector<string > query_modified = query_strings;
+#pragma omp parallel for
   for (int j = 0; j < query_modified.size(); j++){
     for(int k = 0;k < 8; k++) query_modified[j].push_back(j>>(8*k));
   }
 
-  num_query = 8;
   timer timer_recorder;
   vector<vector<size_t > > res(num_query, vector<size_t >());
   vector<size_t> idx(num_base);
