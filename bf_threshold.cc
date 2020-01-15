@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
     {
       ++progress;
     }
-    for (size_t j = 0; j < num_base; ++j) {
+    for (size_t j = (num_query == num_base ? i + 1 : 0); j < num_base; ++j) {
       if (-1 != edit_distance(
                   base_modified[j].c_str(),
                   base_strings[j].size(),

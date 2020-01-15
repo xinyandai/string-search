@@ -16,10 +16,6 @@ using namespace std;
 const vector<size_type > top_k = {
   1, 10, 50, 100
 };
-const vector<size_type > probed = {
-  1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024,
-  2048, 4096, 8192, 16384, 32768, 65536
-};
 
 
 template <class INDEX_TYPE>
@@ -79,11 +75,13 @@ void embed_rank(
   faiss::IndexFlatL2 index(d);
   /*
   size_t n_list = 1000;
+  auto nt = std::min(nb, (size_type)50000);
   faiss::IndexFlatL2 q(d);
   size_t m = 16;
   assert (d % m == 0);
   faiss::IndexIVFPQ index(&q, d, n_list, m, 8);
   */
+
   /*
   size_t nhash = 2;
   size_t nbits_subq = int (log2 (nb+1) / 2);        // good choice in general
@@ -94,23 +92,25 @@ void embed_rank(
   faiss::IndexIVFFlat index (&coarse_quantizer, d, ncentroids, metric);
   index.quantizer_trains_alone = true;
   */
+
   cout << "training index" << endl;
   index.train(nt, xb);
   cout << "add base to index" << endl;
   index.add(nb, xb);
   cout << "done adding items" << endl;
 
-  for (size_t k  : top_k) {
-
-    for (size_t i = 0; i < probed.size(); i++) {
+  for (size_t num_probe = 1; num_probe / 2 < nb; num_probe*=2) {
+    if (num_probe > nb)
+      num_probe = nb;
+    for (size_t k  : top_k) {
       auto recall_time = search(index,
                                 query_strings, base_strings,
                                 query_modified, base_modified,
-                                q_knn, xq, probed[i], k, alpha);
-      std::cout <<  k << "\t"
-                << probed[i] << "\t"
-                <<  recall_time.second << "\t"
-                <<  recall_time.first  << std::endl;
+                                q_knn, xq, num_probe, k, alpha);
+      std::cout << k << "\t"
+                << num_probe << "\t"
+                << recall_time.second << "\t"
+                << recall_time.first  << std::endl;
     }
   }
 }
@@ -197,6 +197,8 @@ int main(int argc, char **argv) {
   cnpy::NpyArray np_xq = cnpy::npy_load(query_embedding);
   cout << np_xq.shape[0] << "x" << np_xq.shape[1] << endl;
   assert(np_xb.shape[1] == np_xq.shape[1]);
+  assert(np_xb.shape[0] == nb);
+  assert(np_xq.shape[0] == nq);
 
   const float* xb = np_xb.data<float >();
   const float* xq = np_xq.data<float >();

@@ -87,11 +87,11 @@ int main(int argc, char **argv) {
   }
 
   cout << "filtering" << endl;
-  size_t can = 0;
+  long long can = 0;
   boost::progress_display progress(nb);
-//#pragma omp parallel for
+#pragma omp parallel for
   for (size_type i = 0; i < nb - 1; ++i) {
-//#pragma omp critical
+#pragma omp critical
     {
       ++progress;
     }
@@ -104,11 +104,14 @@ int main(int argc, char **argv) {
           base_strings[i].size(), threshold_ed);
 
         if (ed != -1 )
-//#pragma omp critical
+#pragma omp critical
         {
           res.emplace_back(i, j);
         }
-	    can++;
+#pragma omp critical
+        {
+	      can++;
+        }
       }
     }
   }
